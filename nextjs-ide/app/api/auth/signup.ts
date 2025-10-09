@@ -2,6 +2,7 @@ import { prisma } from "@/lib/prismaClient";
 import { z } from "zod";
 import { signToken } from "@/lib/jwt";
 import bcrypt from "bcryptjs";
+import { NextRequest,NextResponse } from "next/server";
 
 const signupSchema = z.object({
     email:z.string().email(),
@@ -11,7 +12,7 @@ const signupSchema = z.object({
 });
 
 
-export async function POST(req:Request) {
+export async function POST(req:NextRequest) {
     try{
         const body = await req.json();
         const parsedBody = signupSchema.parse(body);
@@ -21,10 +22,10 @@ export async function POST(req:Request) {
             where:{email},
         });
         if(existingUser){
-            return new Response(JSON.stringify({error:"Email already registered"}),{
-                status:400,
-                headers: { "Content-Type": "application/json" }
-            });
+            return NextResponse.json(
+                { error: "Email already registered" },
+                { status: 400 }
+            );
         }
         const hashedPassword = await bcrypt.hash(password,10);
         const user = await prisma.user.create({
@@ -53,11 +54,13 @@ export async function POST(req:Request) {
         const token = signToken({
                 userId: user.id,
                 email: user.email,
-                role: "user",
+                role: "PARTICIPANT",
                 teamId: team?.id || undefined,
-            },{}
+            },{
+                expiresIn: '24h'
+            }
         );
-        return new Response(JSON.stringify({
+        return NextResponse.json({
             token,
             user:{
                 id:user.id,
@@ -66,26 +69,17 @@ export async function POST(req:Request) {
                 role:'PARTICIPANT',
                 team,
             },
-        }),
-        {
-            status:201,
-            headers: { 'Content-Type': 'application/json' }
-        }
-    );
+        },
+        {status:201}
+        );
     }catch(error){
         if(error instanceof z.ZodError){
-            return new Response(
-                JSON.stringify({error:error.issues}),
-                {
-                    status:400,
-                    headers: { 'Content-Type': 'application/json' }
-                }
-            );
+            return NextResponse.json({ error: error.issues }, { status: 400 });
         }
         console.error('Error signing up',error);
-        return new Response(
-            JSON.stringify({ error: 'Internal server error' }),
-            { status: 500, headers: { 'Content-Type': 'application/json' } }
+        return NextResponse.json(
+            { error: "Internal server error" },
+            { status: 500 }
         );
     }
 }
