@@ -1,0 +1,157 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id            String         @id @default(cuid())
+  email         String         @unique
+  password      String
+  name          String
+  role          Role           @default(PARTICIPANT)
+  teamId        String?
+  team          Team?          @relation("TeamMembers", fields: [teamId], references: [id])
+  ownedTeam     Team?          @relation("TeamOwner")
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  sessions      Session[]
+  proctorEvents ProctorEvent[]
+
+  @@index([email])
+  @@index([teamId])
+}
+
+enum Role {
+  PARTICIPANT
+  ADMIN
+}
+
+model Team {
+  id            String         @id @default(cuid())
+  name          String
+  ownerId       String         @unique
+  owner         User           @relation(fields: [ownerId], references: [id], name: "TeamOwner")
+  members       User[]         @relation("TeamMembers")
+  sessions      Session[]
+  files         File[]
+  submissions   Submission[]
+  aiUsage       AIUsage[]
+  containerInfo ContainerInfo?
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+
+  @@index([name])
+}
+
+model Session {
+  id        String    @id @default(cuid())
+  teamId    String
+  team      Team      @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  startedAt DateTime  @default(now())
+  endedAt   DateTime?
+  active    Boolean   @default(true)
+
+  @@index([teamId])
+  @@index([userId])
+  @@index([active])
+}
+
+model File {
+  id        String   @id @default(cuid())
+  teamId    String
+  team      Team     @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  path      String
+  content   String   @db.Text
+  version   Int      @default(1)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([teamId, path])
+  @@index([teamId])
+}
+
+model Submission {
+  id          String           @id @default(cuid())
+  teamId      String
+  team        Team             @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  fileName    String
+  filePath    String
+  s3Key       String
+  cdnUrl      String?
+  status      SubmissionStatus @default(UPLOADED)
+  submittedAt DateTime         @default(now())
+
+  @@index([teamId])
+  @@index([status])
+}
+
+enum SubmissionStatus {
+  UPLOADED
+  EXTRACTED
+  VALIDATED
+  DEPLOYED
+  FAILED
+}
+
+model ContainerInfo {
+  id          String    @id @default(cuid())
+  teamId      String    @unique
+  team        Team      @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  containerId String    @unique
+  status      String
+  createdAt   DateTime  @default(now())
+  stoppedAt   DateTime?
+
+  @@index([containerId])
+}
+
+model AIUsage {
+  id       String   @id @default(cuid())
+  teamId   String
+  team     Team     @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  prompt   String   @db.Text
+  response String   @db.Text
+  usedAt   DateTime @default(now())
+
+  @@index([teamId])
+}
+
+model ProctorEvent {
+  id        String    @id @default(cuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  eventType EventType
+  details   String?   @db.Text
+  timestamp DateTime  @default(now())
+
+  @@index([userId])
+  @@index([eventType])
+  @@index([timestamp])
+}
+
+enum EventType {
+  TAB_SWITCH
+  DEVTOOLS_OPEN
+  CLIPBOARD_COPY
+  CLIPBOARD_PASTE
+  FULLSCREEN_EXIT
+  FOCUS_LOSS
+  SUSPICIOUS_ACTIVITY
+}
+
+model TerminalLog {
+  id        String   @id @default(cuid())
+  teamId    String
+  command   String   @db.Text
+  output    String?  @db.Text
+  timestamp DateTime @default(now())
+
+  @@index([teamId])
+  @@index([timestamp])
+}
