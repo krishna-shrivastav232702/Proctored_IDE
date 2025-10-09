@@ -48,9 +48,7 @@ export async function POST(req:NextRequest){
             email:user.email,
             role:user.role,
             teamId:user.teamId || undefined,
-        }, {
-            expiresIn: '24h'
-        });
+        }, {});
         return NextResponse.json({
             token,
             user:{

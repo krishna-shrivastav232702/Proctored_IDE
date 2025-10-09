@@ -56,9 +56,7 @@ export async function POST(req:NextRequest) {
                 email: user.email,
                 role: "PARTICIPANT",
                 teamId: team?.id || undefined,
-            },{
-                expiresIn: '24h'
-            }
+            },{}
         );
         return NextResponse.json({
             token,
