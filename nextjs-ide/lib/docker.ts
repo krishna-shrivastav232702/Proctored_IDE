@@ -49,9 +49,7 @@ export const createContainer = async (teamId:string,image:string):Promise<string
             'NPM_CONFIG_UPDATE_NOTIFIER=false',
         ],
     });
-
     await container.start();
-
     await prisma.containerInfo.create({
         data:{
             teamId,
@@ -60,6 +58,104 @@ export const createContainer = async (teamId:string,image:string):Promise<string
         }
     });
     return container.id;
+}
+
+export const stopContainer = async(teamId:string):Promise<void> => {
+    const containerInfo = await prisma.containerInfo.findUnique({
+        where:{teamId},
+    });
+    if(!containerInfo){
+        return;
+    }
+    try {
+        const container = docker.getContainer(containerInfo.containerId);
+        await container.stop({t:10});
+        await container.remove();
+    } catch (error) {
+        console.error(`Error stopping container for team ${teamId}:`,error);
+    }
+
+    await prisma.containerInfo.update({
+        where:{
+            teamId
+        },
+        data:{
+            status:'stopped',
+            stoppedAt:new Date(),
+        },
+    });
+}
+
+
+export const getContainerStatus= async (teamId:string):Promise<{
+    running:boolean;
+    containerId?:string;
+    stats?:any;
+}>=>{
+    const containerInfo = await prisma.containerInfo.findUnique({
+        where:{teamId},
+    });
+    if(!containerInfo){
+        return { running: false };
+    }
+    try {
+        const container = docker.getContainer(containerInfo.containerId);
+        const info = await container.inspect();
+        const stats = await container.stats({
+            stream:false
+        });
+        return {
+            running: info.State.Running,
+            containerId:containerInfo.containerId,
+            stats:{
+                cpu: calculateCPUPercent(stats),
+                memory:{
+                    usage: stats.memory_stats.usage,
+                    limit: stats.memory_stats.limit,
+                    percent: (stats.memory_stats.usage / stats.memory_stats.limit) * 100,
+                }
+            }
+        };
+    } catch (error) {
+        return {
+            running:false
+        }
+    }
+}
+
+
+export const executeCommand = async (containerId:string,command:string):Promise<{
+    stdout:string;
+    stderr:string
+}> =>{
+    const container = docker.getContainer(containerId);
+    const exec = await container.exec({
+        Cmd: ['/bin/sh','-c',command],
+        AttachStdout:true,
+        AttachStderr:true,
+    });
+    const stream = await exec.start({Detach:false});
+    return new Promise((resolve,reject) => {
+        let stdout = '';
+        let stderr = '';
+        stream.on('data',(chunck:Buffer)=>{
+            const str = chunck.toString();
+            if(chunck[0] === 1){
+                stdout += str.slice(8);
+            }else if(chunck[0] === 2){
+                stderr += str.slice(8);
+            }
+        });
+        stream.on('end',()=>{
+            resolve({stdout,stderr});
+        });
+        stream.on('error',reject);
+    });
+}
+
+
+export const getContainer = (containerId:string) =>{
+    return docker.getContainer(containerId);
 }
 
 
@@ -77,4 +173,11 @@ const parseMemory = (memory:string):number =>{
     return parseInt(match[1]) * units[match[2]];
 }
 
-
+const calculateCPUPercent = (stats:any):number =>{
+    const cpuDelta = stats.cpu_stats.cpu_usage.total_usage - stats.precpu_stats.cpu_usage.total_usage;
+    const systemDelta = stats.cpu_stats.system_cpu_usage - stats.precpu_stats.system_cpu_usage;
+    if(systemDelta > 0 && cpuDelta > 0){
+        return (cpuDelta / systemDelta) * stats.cpu_stats.online_cpus * 100;
+    }
+    return 0;
+}
