@@ -5,11 +5,13 @@ import { Button } from "./components/ui/button";
 import { Input } from "./components/ui/input";
 import { Card } from "./components/ui/card";
 import { Code2, Zap, Users } from "lucide-react";
-import { useRouter } from "next/navigation";
+import LoginModal from "./components/ui/LoginModal";
+import RegisterModal from "./components/ui/RegisterModal";
 
 export default function Home() {
   const [teamName, setTeamName] = useState("");
-  const router = useRouter();
+  const [showLogin, setShowLogin] = useState(false);
+  const [showRegister, setShowRegister] = useState(false);
 
   const handleJoinTeam = (e: React.FormEvent) => {
     e.preventDefault();
@@ -31,13 +33,13 @@ export default function Home() {
               <Button
                 variant="outline"
                 className="border-emerald-500/50 text-emerald-400 hover:bg-emerald-500/10 hover:text-emerald-300"
-                onClick={() => router.push("/login")}
+                onClick={() => setShowLogin(true)}
               >
                 Login
               </Button>
               <Button
                 className="bg-gradient-to-r from-emerald-500 to-cyan-500 hover:from-emerald-600 hover:to-cyan-600 text-white shadow-lg shadow-emerald-500/20"
-                onClick={() => router.push("/register")}
+                onClick={() => setShowRegister(true)}
               >
                 Register
               </Button>
@@ -80,7 +82,7 @@ export default function Home() {
             <Button
               size="lg"
               className="bg-gradient-to-r from-emerald-500 to-cyan-500 hover:from-emerald-600 hover:to-cyan-600 text-white shadow-xl shadow-emerald-500/30 text-lg px-8 py-6"
-              onClick={() => router.push("/register")}
+              onClick={() => setShowRegister(true)}
             >
               Register Now
             </Button>
@@ -88,7 +90,7 @@ export default function Home() {
               size="lg"
               variant="outline"
               className="border-cyan-500/50 text-cyan-400 hover:bg-cyan-500/10 hover:text-cyan-300 text-lg px-8 py-6"
-              onClick={() => router.push("/login")}
+              onClick={() => setShowLogin(true)}
             >
               Login
             </Button>
@@ -153,6 +155,18 @@ export default function Home() {
           </div>
         </div>
       </footer>
+      {showLogin && (
+        <LoginModal
+          closeModal={() => setShowLogin(false)}
+          onSwitchToRegister={() => setShowRegister(true)}
+        />
+      )}
+      {showRegister && (
+        <RegisterModal
+          closeModal={() => setShowRegister(false)}
+          onSwitchToLogin={() => setShowLogin(true)}
+        />
+      )}
     </div>
   );
 }
