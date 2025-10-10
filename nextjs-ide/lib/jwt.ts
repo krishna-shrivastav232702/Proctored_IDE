@@ -1,5 +1,5 @@
 import jwt from "jsonwebtoken";
-import { NextApiRequest } from "next";
+import { NextRequest } from "next/server";
 
 const JWT_SECRET = process.env.JWT_SECRET!;
 
@@ -29,15 +29,15 @@ export async function verifyToken(token:string):Promise<JWTPayload | null>{
 }
 
 
-export function extractTokenFromRequest(req:NextApiRequest):string | null {
-    const authHeader = req.headers.authorization;
+export function extractTokenFromRequest(req:NextRequest):string | null {
+    const authHeader = req.headers.get('authorization');
     if(!authHeader?.startsWith('Bearer ')){
         return null;
     }
     return authHeader.substring(7);
 }
 
-export async function getUserFromRequest(req:NextApiRequest):Promise<JWTPayload | null> {
+export async function getUserFromRequest(req:NextRequest):Promise<JWTPayload | null> {
     const token = extractTokenFromRequest(req);
     if(!token) return null;
     return await verifyToken(token);
