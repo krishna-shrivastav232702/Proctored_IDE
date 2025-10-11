@@ -5,18 +5,18 @@ import { NextRequest, NextResponse } from "next/server";
 
 
 
-export async function GET(req:NextRequest){
+export async function GET(req:NextRequest,{params}:{params:{sessionId:string}}){
     const user = await getUserFromRequest(req);
     if(!user){
         return NextResponse.json({
             error:"Unauthorized"
         },{status:401});
     }
-    const sessionId = req.nextUrl.searchParams.get("sessionId");
+    const sessionId = params.sessionId;
     try {
         const session = await prisma.session.findUnique({
             where:{
-                id:sessionId as string
+                id:sessionId
             },
             include:{
                 user:{
