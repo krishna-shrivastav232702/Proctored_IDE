@@ -2,19 +2,19 @@ import { getUserFromRequest } from "@/lib/jwt";
 import { prisma } from "@/lib/prismaClient";
 import { NextRequest, NextResponse } from "next/server";
 
-export async function GET(req:NextRequest){
+export async function GET(req:NextRequest,{params}:{params:{teamId:string}}){
     const user = await getUserFromRequest(req);
     if(!user){
         return NextResponse.json({error:"Unauthorized"},{status:400});
     }
-    const teamId = req.nextUrl.searchParams.get("teamId");
+    const teamId = params.teamId;
     if(!teamId){
         return NextResponse.json({error:"Missing Teamid"},{status:400});
     }
     try {
         const team = await prisma.team.findUnique({
             where:{
-                id:teamId as string
+                id:teamId 
             },
             include:{
                 members:{
