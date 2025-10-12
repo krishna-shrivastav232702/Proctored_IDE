@@ -4,16 +4,17 @@ import { useState, useEffect } from "react";
 interface RegisterModalProps {
   closeModal: () => void;
   onSwitchToLogin?: () => void;
+  onRegisterSuccess?: (userData: any) => void;
 }
 
 export default function RegisterModal({
   closeModal,
   onSwitchToLogin,
+  onRegisterSuccess,
 }: RegisterModalProps) {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [confirmPassword, setConfirmPassword] = useState("");
   const [teamName, setTeamName] = useState("");
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
@@ -43,14 +44,8 @@ export default function RegisterModal({
     setMessage("");
     setError("");
 
-    if (!name || !email || !password || !confirmPassword) {
+    if (!name || !email || !password) {
       setError("Please fill in all required fields.");
-      setLoading(false);
-      return;
-    }
-
-    if (password !== confirmPassword) {
-      setError("Passwords do not match.");
       setLoading(false);
       return;
     }
@@ -64,11 +59,21 @@ export default function RegisterModal({
 
       const data = await res.json();
       if (!res.ok) throw new Error(data.message || "Registration failed");
+
+      // Store token in localStorage
+      if (data.token) {
+        localStorage.setItem("token", data.token);
+      }
+
+      // Call onRegisterSuccess if provided
+      if (onRegisterSuccess && data.user) {
+        onRegisterSuccess(data.user);
+      }
+
       setMessage("✅ Registration successful! You can now log in.");
       setName("");
       setEmail("");
       setPassword("");
-      setConfirmPassword("");
       setTeamName("");
     } catch (err: unknown) {
       if (err instanceof Error) setError(err.message);
@@ -132,14 +137,6 @@ export default function RegisterModal({
             onChange={(e) => setPassword(e.target.value)}
             required
           />
-          {/* <input
-            type="password"
-            placeholder="Confirm Password *"
-            className="p-3 rounded-lg bg-gray-800/80 border border-gray-600 focus:outline-none focus:border-emerald-500 text-white placeholder-gray-400 transition-colors"
-            value={confirmPassword}
-            onChange={(e) => setConfirmPassword(e.target.value)}
-            required
-          /> */}
           <input
             type="text"
             placeholder="Team Name (Optional)"

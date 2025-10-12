@@ -4,11 +4,13 @@ import { useState, useEffect } from "react";
 interface LoginModalProps {
   closeModal: () => void;
   onSwitchToRegister?: () => void;
+  onLoginSuccess?: (userData: any) => void;
 }
 
 export default function LoginModal({
   closeModal,
   onSwitchToRegister,
+  onLoginSuccess,
 }: LoginModalProps) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -46,6 +48,9 @@ export default function LoginModal({
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.message || "Login failed");
+      if (onLoginSuccess) {
+        onLoginSuccess(data.user); // Assuming your API returns user data
+      }
       alert("✅ Login successful!");
       handleClose();
     } catch (err) {
