@@ -1,6 +1,5 @@
 import * as Y from "yjs";
 import { redis } from "../lib/redis";
-import { timeStamp } from "console";
 import { emitToTeam } from "./websocket";
 
 // remember few code changes , changing the system from every team's timer to a global timer 

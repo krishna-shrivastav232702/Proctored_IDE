@@ -25,6 +25,8 @@
     "express": "^5.1.0",
     "formidable": "^3.5.4",
     "jsonwebtoken": "^9.0.2",
+    "socket.io": "^4.8.1",
+    "yjs": "^13.6.27",
     "zod": "^4.1.12"
   },
   "devDependencies": {
