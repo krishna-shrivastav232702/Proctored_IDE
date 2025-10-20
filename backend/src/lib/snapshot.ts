@@ -1,7 +1,8 @@
 import { DeleteObjectCommand, ListObjectsV2Command, S3Client } from "@aws-sdk/client-s3";
 import { getContainer } from "./docker";
 import { prisma } from "./prismaClient";
-import { uploadToS3 } from "./s3";
+import { getFromS3, uploadToS3 } from "./s3";
+import archiver from "archiver";
 
 
 
@@ -138,6 +139,61 @@ export const cleanupOldSnapshots = async(teamId:string):Promise<void> => {
 
 
 
+export const compressWorkspace = async(teamId:string,sourcePath:string):Promise<Buffer> => {
+    return new Promise((resolve,reject) => {
+        const archive = archiver('tar',{
+            gzip:true,
+            gzipOptions:{
+                level:6
+            }
+        });
+        const chunks: Buffer[] = [];
+        archive.on("data",(chunk) => {
+            chunks.push(chunk);
+        })
+        archive.on('end',() => {
+            const buffer = Buffer.concat(chunks);
+            console.log(`📦 Compressed workspace for team ${teamId}: ${(buffer.length / 1024 / 1024).toFixed(2)}MB`);
+            resolve(buffer);
+        })
+        archive.on("error",reject);
+        archive.directory(sourcePath,false);
+        archive.finalize();
+    })
+}
+
+
+
+
+export const restoreSnapshot = async (teamId:string,snapshotId:string):Promise<void> => {
+    try{
+        console.log(`Restoring snapshot ${snapshotId} for team ${teamId}`);
+        const containerInfo = await prisma.containerInfo.findUnique({
+            where:{
+                teamId
+            }
+        });
+        if(!containerInfo){
+            throw new Error(`Container not found for team ${teamId}`);
+        }
+        const s3Key = `code-snapshots/team-${teamId}/${snapshotId.split("-")[1]}.tar.gz`;
+        const archiveBuffer = await getFromS3(s3Key);
+        const container = getContainer(containerInfo.containerId);
+        const tempPath = `/tmp/restore-${Date.now()}.tar.gz`;
+        await container.putArchive(archiveBuffer,{
+            path:"/tmp"
+        });
+        await container.exec({
+            Cmd:["/bin/sh","-c",`rm -rf /workspace/* && tar -xzf ${tempPath} -C /workspace && rm -f ${tempPath}`],
+            AttachStdout:true,
+            AttachStderr:true
+        })
+        console.log(`Snapshot restored for team ${teamId}`);
+    }catch(error){
+        console.error(`Error restoring snapshot for team ${teamId}:`, error);
+        throw error;
+    }
+}
 
 
 export const stopAutoSnapshort = (teamId:string):void => {
