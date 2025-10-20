@@ -53,13 +53,25 @@ export const startMonitoring = () : void => {
     console.log("Started container monitoring...");
     monitoringInterval = setInterval(async ()=>{
         try {
-            
+            await monitorAllContainers();
         } catch (error) {
-            
+            console.error("Error in monitoring loop:",error);
         }
-    })
-}
+    },MONITORING_INTERVAL);
+};
 
+
+export const stopMonitoring = ():void => {
+    if(monitoringInterval){
+        clearInterval(monitoringInterval);
+        monitoringInterval = null;
+        console.log("stopped container monitoring");
+    }
+    for(const timer of anomalyTimers.values()){
+        clearTimeout(timer);
+    }
+    anomalyTimers.clear();
+}
 
 
 const monitorAllContainers = async():Promise<void> => {
