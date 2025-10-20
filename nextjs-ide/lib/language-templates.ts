@@ -9,6 +9,7 @@ export interface LanguageTemplate {
   name: string;
   displayName: string;
   files: FileTemplate[];
+  logo?: React.ComponentType<{ className?: string }>;
 }
 
 export const languageTemplates: Record<string, LanguageTemplate> = {
