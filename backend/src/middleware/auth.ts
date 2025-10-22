@@ -3,6 +3,11 @@ import { getUserFromRequest, JWTPayload } from "../lib/jwt";
 
 export interface AuthRequest extends Request {
   user?: JWTPayload;
+  rateLimit?: {
+    limit: number;
+    current: number;
+    remaining: number;
+  };
 }
 
 export const authenticate = async (

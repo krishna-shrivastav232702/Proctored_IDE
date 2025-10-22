@@ -14,6 +14,10 @@ interface AuthSocket extends Socket {
 
 export const setupWebSocketHandlers = (socket:AuthSocket):void =>{
     const user = socket.user!;
+    if(user.role === "ADMIN"){
+        socket.join("admin-room");
+        console.log(`Admin ${user.email} joined the admin-room`);
+    }
     if(user.teamId){ // join team room if exists
         socket.join(`team-${user.teamId}`);
         setupYjsRoom(user.teamId);
