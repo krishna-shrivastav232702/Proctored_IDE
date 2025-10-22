@@ -1,17 +1,17 @@
 import Docker from "dockerode";
 import { prisma } from "./prismaClient";
+import { getDockerImage } from "./frameworkTemplate";
 
 const docker = new Docker({
   socketPath: process.env.DOCKER_HOST!,
 });
 
-const containerImage = process.env.CONTAINER_NAME!;
-const memoryLimit = process.env.CONTAINER_MEMORY_LIMIT!;
-const cpuLimit = parseFloat(process.env.CONTAINER_CPU_LIMIT!);
+const memoryLimit = process.env.CONTAINER_MEMORY_LIMIT || "512m";
+const cpuLimit = parseFloat(process.env.CONTAINER_CPU_LIMIT || "0.5");
 
 export const createContainer = async (
   teamId: string,
-  image: string
+  image?: string
 ): Promise<string> => {
   const existing = await prisma.containerInfo.findUnique({
     where: { teamId },
@@ -29,8 +29,39 @@ export const createContainer = async (
       await prisma.containerInfo.delete({ where: { teamId } });
     }
   }
+  const team = await prisma.team.findUnique({
+    where:{
+      id: teamId
+    },
+    select:{
+      framework:true
+    }
+  });
+  if(!team){
+    throw new Error(`Team ${teamId} not found`);
+  }
+  const framework = team.framework || "NEXTJS";
+  const dockerImage = image || getDockerImage(framework);
+  console.log(`Creating container for team ${teamId} with framework ${framework}, image: ${dockerImage}`);
+  const volumeName = `team-${teamId}-volume`;
+  try {
+    await docker.createVolume({Name:volumeName});
+    console.log(`Created volume ${volumeName}`);
+  } catch (error) {
+    console.log(`Volume ${volumeName} already exists , reusing it`);
+  }
+
+  const envVars = ["TERM=xterm-256color"];
+  const nodeFrameworks = ["NEXTJS", "REACT_VITE", "VUE", "ANGULAR", "SVELTE"];
+  if (nodeFrameworks.includes(framework)) {
+    envVars.push(
+      "NODE_ENV=development",
+      "NPM_CONFIG_UPDATE_NOTIFIER=false",
+      "NPM_CONFIG_CACHE=/workspace/.npm"
+    );
+  }
   const container = await docker.createContainer({
-    Image: image,
+    Image: dockerImage,
     name: `ide-${teamId}`,
     Tty: true,
     OpenStdin: true,
@@ -44,10 +75,20 @@ export const createContainer = async (
       NanoCpus: cpuLimit * 1e9,
       NetworkMode: "bridge",
       AutoRemove: false,
+      Binds: [`${volumeName}:/workspace`],
+      StorageOpt: {
+        size: "2G"
+      },
+      PidsLimit: 100,
+      Ulimits: [
+        { Name: "nofile", Soft: 1024, Hard:1024 },
+        { Name: "nproc", Soft: 100, Hard: 100 }
+      ]
     },
-    Env: ["NODE_ENV=development", "NPM_CONFIG_UPDATE_NOTIFIER=false"],
+    Env: envVars,
   });
   await container.start();
+  console.log(`Started container ${container.id} for team ${teamId}`);
   await prisma.containerInfo.create({
     data: {
       teamId,
@@ -55,6 +96,7 @@ export const createContainer = async (
       status: "running",
     },
   });
+  console.log(`Container ${container.id} ready for team ${teamId} with framework ${framework}`);
   return container.id;
 };
 
@@ -70,7 +112,7 @@ export const stopContainer = async (teamId: string): Promise<void> => {
     await container.stop({ t: 10 });
     await container.remove();
   } catch (error) {
-    console.error(`Error stopping container for team ${teamId}:`, error);
+    console.error(`Error stopping container ${containerInfo.containerId} for team ${teamId}:`, error);
   }
 
   await prisma.containerInfo.update({
@@ -139,11 +181,11 @@ export const executeCommand = async (
   return new Promise((resolve, reject) => {
     let stdout = "";
     let stderr = "";
-    stream.on("data", (chunck: Buffer) => {
-      const str = chunck.toString();
-      if (chunck[0] === 1) {
+    stream.on("data", (chunk: Buffer) => {
+      const str = chunk.toString();
+      if (chunk[0] === 1) {
         stdout += str.slice(8);
-      } else if (chunck[0] === 2) {
+      } else if (chunk[0] === 2) {
         stderr += str.slice(8);
       }
     });
@@ -166,7 +208,7 @@ const parseMemory = (memory: string): number => {
     g: 1024 * 1024 * 1024,
   };
   const match = memory.toLowerCase().match(/^(\d+)([bkmg])$/);
-  if (!match) return 1024 * 1024 * 1024;
+  if (!match) return 512 * 1024 * 1024; // default 512 mb
   return parseInt(match[1]) * units[match[2]];
 };
 
