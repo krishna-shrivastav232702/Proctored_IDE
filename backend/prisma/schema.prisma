@@ -33,6 +33,7 @@ enum Role {
 model Team {
   id            String         @id @default(cuid())
   name          String
+  framework     Framework      @default(NEXTJS)
   ownerId       String         @unique
   owner         User           @relation(fields: [ownerId], references: [id], name: "TeamOwner")
   members       User[]         @relation("TeamMembers")
@@ -46,6 +47,16 @@ model Team {
 
   @@index([name])
 }
+
+enum Framework {
+  NEXTJS
+  REACT_VITE
+  VUE
+  ANGULAR
+  SVELTE
+  STATIC_HTML
+}
+
 
 model Session {
   id        String    @id @default(cuid())
@@ -92,6 +103,7 @@ model Submission {
 }
 
 enum SubmissionStatus {
+  PROCESSING
   UPLOADED
   EXTRACTED
   VALIDATED
