@@ -6,6 +6,7 @@ import { closeTerminalSession, createTerminalSession, resizeTerminal, sendComman
 import { logProctoringEvent } from "./proctoring";
 import { executeCommand } from "../lib/docker";
 import { submitTeamBuild } from "./submission";
+import { addBuildJob, getQueuePosition } from "./buildQueue";
 
 interface AuthSocket extends Socket {
     user?: JWTPayload;
@@ -250,7 +251,7 @@ export const setupWebSocketHandlers = (socket:AuthSocket):void =>{
             }
 
             // Add to build queue
-            const job = await buildQueue.addBuildJob({
+            const job = await addBuildJob({
                 teamId: user.teamId,
                 containerId: containerInfo.containerId,
                 buildCommand: data.buildCommand || "npm run build"
@@ -258,7 +259,7 @@ export const setupWebSocketHandlers = (socket:AuthSocket):void =>{
 
             socket.emit("build:queued", {
                 jobId: job.id,
-                position: await buildQueue.getQueuePosition(job.id)
+                position: await getQueuePosition(job.id)
             });
         } catch (error) {
             console.error("Error starting build:", error);
