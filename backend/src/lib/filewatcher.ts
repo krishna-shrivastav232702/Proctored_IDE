@@ -16,12 +16,17 @@ interface WatcherInfo {
     watcher: FSWatcher;
     teamId:string;
     containerId:string;
+    volumePath: string;
     batchedEvents: FileChange[];
     batchTimeout: NodeJS.Timeout | null;
+    errorCount: number; 
+    lastError: Date | null;
 }
 
 const watchers = new Map<string,WatcherInfo>();
 const BATCH_DELAY = 1000;
+const MAX_RESTART_ATTEMPTS = 3;
+const RESTART_DELAY = 7000;
 
 
 
@@ -55,8 +60,11 @@ export const watchTeamVolume = (teamId:string,containerId:string,volumePath:stri
         watcher,
         teamId,
         containerId,
+        volumePath,
         batchedEvents: [],
-        batchTimeout: null
+        batchTimeout: null,
+        errorCount: 0,
+        lastError: null
     };
 
     watcher.on("add",(filePath) => {
@@ -76,20 +84,74 @@ export const watchTeamVolume = (teamId:string,containerId:string,volumePath:stri
     })
     watcher.on("error",(error) => {
         console.error(`File watcher error for team ${teamId}`,error);
+        handleWatcherError(watcherInfo,error as Error);
     })
     watcher.on("ready",() => {
         console.log(`File watcher ready for team ${teamId}`);
+        watcherInfo.errorCount = 0;
+        watcherInfo.lastError = null;
     })
     watchers.set(teamId,watcherInfo);
 }
 
 
 
+const handleWatcherError = (watcherInfo:WatcherInfo,error:Error): void => {
+    console.error(`File watcher error for team ${watcherInfo.teamId}:`,error);
+
+    watcherInfo.errorCount++;
+    watcherInfo.lastError = new Date();
+
+    emitToTeam(watcherInfo.teamId,"watcher:error",{
+        message:"File watcher encountered on error",
+        timestamp: Date.now()
+    });
+
+    if(watcherInfo.errorCount <= MAX_RESTART_ATTEMPTS){
+        console.log(`Attempting to restart file watcher for team ${watcherInfo.teamId} (attempt ${watcherInfo.errorCount}/${MAX_RESTART_ATTEMPTS})`);
+        setTimeout(() => {
+            restartWatcher(watcherInfo);
+        },RESTART_DELAY);
+    }else{
+        console.error(`File watcher for team ${watcherInfo.teamId} failed after ${MAX_RESTART_ATTEMPTS} attempts. Manual intervention required.`); 
+        emitToTeam(watcherInfo.teamId, "watcher:failed", {
+            message: "File watcher failed to restart. Please contact support.",
+            timestamp: Date.now()
+        });
+        stopWatcher(watcherInfo.teamId);
+    }
+}
+
+const restartWatcher = (watcherInfo:WatcherInfo):void => {
+    const {teamId,containerId,volumePath} = watcherInfo;
+    console.log(`Restarting file watcher for team ${teamId}...`);
+    //closing existing watcher
+    try {
+        watcherInfo.watcher.close();
+    } catch (error) {
+        console.error(`Error closing watcher for team ${teamId}:`, error);
+    }
+    watchers.delete(teamId);
+    try {
+        watchTeamVolume(teamId,containerId,volumePath);
+        emitToTeam(teamId,"watcher:restarted",{
+            message:"file watcher restarted successfully",
+            timestamp: Date.now()
+        });
+        console.log("file watcher restarted");
+    } catch (error) {
+        const newWatcherInfo = watchers.get(teamId);
+        if (newWatcherInfo) {
+            handleWatcherError(newWatcherInfo, error as Error);
+        }
+    }
+}
+
+
 
 
 const handleFileChange = (watcherInfo:WatcherInfo,type:FileChange["type"], filePath:string) : void => {
     const relativePath = path.relative(`/var/lib/docker/volumes/team-${watcherInfo.teamId}-volume/_data`,filePath);
-    // add to batched events
     watcherInfo.batchedEvents.push({
         type,
         path: relativePath,
@@ -115,6 +177,13 @@ export const stopWatcher = (teamId:string):void => {
         clearTimeout(watcherInfo.batchTimeout);
         sendBatchedEvents(watcherInfo);
     }
+    try {
+        watcherInfo.watcher.close();
+        console.log(`File watcher stopped for team ${teamId}`);
+    } catch (error) {
+        console.error(`Error stopping watcher for team ${teamId}:`, error);
+    }
+    watchers.delete(teamId);
 }
 
 
