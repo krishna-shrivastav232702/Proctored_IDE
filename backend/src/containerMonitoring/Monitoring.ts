@@ -106,16 +106,17 @@ const handleAnomalies = async(teamId:string,containerId:string,anomalies:Anomaly
         const anomalyKey = `${teamId}:${anomaly.type}`;
         if(anomaly.severity === "CRITICAL"){
             // Check if anomaly persists
+            sendAdminAlert(teamId,anomaly);
             if (!anomalyTimers.has(anomalyKey)) {
-                // Start timer for critical anomaly
                 const timer = setTimeout(async () => {
-                // Take action if still critical after 30 seconds
-                    await handlePersistentAnomaly(teamId, containerId, anomaly);
+                    sendAdminAlert(teamId, {
+                        ...anomaly,
+                        message: `PERSISTENT: ${anomaly.message} (>30s)`
+                    });
                     anomalyTimers.delete(anomalyKey);
                 }, CRITICAL_DURATION);
                 anomalyTimers.set(anomalyKey, timer);
             }
-            sendAdminAlert(teamId,anomaly);
         }else if(anomaly.severity === "WARNING"){
             // Clear critical timer if warning level
             if (anomalyTimers.has(anomalyKey)) {

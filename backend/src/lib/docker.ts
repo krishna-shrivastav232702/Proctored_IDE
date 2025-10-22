@@ -166,7 +166,8 @@ export const getContainerStatus = async (
 
 export const executeCommand = async (
   containerId: string,
-  command: string
+  command: string,
+  timeoutMs: number = 30000
 ): Promise<{
   stdout: string;
   stderr: string;
@@ -181,6 +182,13 @@ export const executeCommand = async (
   return new Promise((resolve, reject) => {
     let stdout = "";
     let stderr = "";
+    let resolved = false;
+    const timeout = setTimeout(() => {
+      if (!resolved) {
+        resolved = true;
+        reject(new Error(`Command execution timeout after ${timeoutMs}ms`));
+      }
+    }, timeoutMs);
     stream.on("data", (chunk: Buffer) => {
       const str = chunk.toString();
       if (chunk[0] === 1) {
@@ -190,9 +198,19 @@ export const executeCommand = async (
       }
     });
     stream.on("end", () => {
-      resolve({ stdout, stderr });
+      if (!resolved) {
+        resolved = true;
+        clearTimeout(timeout);
+        resolve({ stdout, stderr });
+      }
     });
-    stream.on("error", reject);
+    stream.on("error", (err) => {
+      if (!resolved) {
+        resolved = true;
+        clearTimeout(timeout);
+        reject(err);
+      }
+    });
   });
 };
 
