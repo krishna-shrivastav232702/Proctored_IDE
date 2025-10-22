@@ -196,7 +196,7 @@ export const restoreSnapshot = async (teamId:string,snapshotId:string):Promise<v
 }
 
 
-export const stopAutoSnapshort = (teamId:string):void => {
+export const stopAutoSnapshot = (teamId:string):void => {
     const timer = snapshotTimers.get(teamId);
     if(timer){
         clearInterval(timer);
