@@ -4,6 +4,8 @@ import { addConnection, handleYjsSync, persistYjsSnapshot, removeConnection, set
 import { prisma } from "../lib/prismaClient";
 import { closeTerminalSession, createTerminalSession, resizeTerminal, sendCommand } from "../lib/terminal";
 import { logProctoringEvent } from "./proctoring";
+import { executeCommand } from "../lib/docker";
+import { submitTeamBuild } from "./submission";
 
 interface AuthSocket extends Socket {
     user?: JWTPayload;
@@ -101,6 +103,23 @@ export const setupWebSocketHandlers = (socket:AuthSocket):void =>{
     socket.on("file:save",async(data:{path:string;content:string})=>{
         if(!user.teamId) return;
         try {
+            const containerInfo = await prisma.containerInfo.findUnique({
+                where:{
+                    teamId: user.teamId
+                }
+            });
+            if(!containerInfo){
+                socket.emit("file:error",{
+                    message:"Container not found . Start a session first"
+                });
+                return;
+            }
+            //base64 safer than shell escaping
+            const base64Content = Buffer.from(data.content).toString('base64');
+            await executeCommand(
+                containerInfo.containerId,
+                `mkdir -p "/workspace/$(dirname "${data.path}")" && echo '${base64Content}' | base64 -d > "/workspace/${data.path}"`
+            )
             await prisma.file.upsert({
                 where:{
                     teamId_path:{
@@ -109,13 +128,13 @@ export const setupWebSocketHandlers = (socket:AuthSocket):void =>{
                     },
                 },
                 update:{
-                    content:data.content,
+                    content:"",
                     version:{increment:1},
                 },
                 create:{
                     teamId:user.teamId,
                     path:data.path,
-                    content:data.content,
+                    content:"",
                 }
             });
             socket.emit("file:saved",{path:data.path});
@@ -140,11 +159,28 @@ export const setupWebSocketHandlers = (socket:AuthSocket):void =>{
     })=>{
         if(!user.teamId) return;
         try {
+            const containerInfo = await prisma.containerInfo.findUnique({
+                where:{
+                    teamId:user.teamId
+                }
+            });
+            if(!containerInfo){
+                socket.emit("file:error",{
+                    message: "Container not found. Start a session first"
+                });
+                return;
+            }
+
+            const base64Content = Buffer.from(data.content || "").toString('base64');
+            await executeCommand(
+                containerInfo.containerId,
+                `mkdir -p "/workspace/$(dirname "${data.path}")" && echo '${base64Content}' | base64 -d > "/workspace/${data.path}"`
+            )
             await prisma.file.create({
                 data:{
                     teamId:user.teamId,
                     path: data.path,
-                    content: data.content || "",
+                    content:"",
                 }
             });
             socket.emit("file:created",{path:data.path});
@@ -165,6 +201,17 @@ export const setupWebSocketHandlers = (socket:AuthSocket):void =>{
     socket.on("file:delete",async(data:{path:string})=>{
         if(!user.teamId) return;
         try {
+            const containerInfo = await prisma.containerInfo.findUnique({
+                where:{ teamId: user.teamId }
+            });
+            
+            if(containerInfo){
+                // Delete from container
+                await executeCommand(
+                    containerInfo.containerId,
+                    `rm -f "/workspace/${data.path}"`
+                );
+            }
             await prisma.file.delete({
                 where:{
                     teamId_path:{
@@ -172,7 +219,9 @@ export const setupWebSocketHandlers = (socket:AuthSocket):void =>{
                         path: data.path
                     }
                 }
-            })
+            }).catch(() => {
+                
+            });
             socket.emit("file:deleted",{path:data.path});
             socket.to(`team-${user.teamId}`).emit("file:changed",{
                 path:data.path,
@@ -188,7 +237,52 @@ export const setupWebSocketHandlers = (socket:AuthSocket):void =>{
     });
 
 
-    //TODO: build & deployment logic not added
+    socket.on("build:start", async (data: { buildCommand?: string }) => {
+        if (!user.teamId) return;
+        try {
+            const containerInfo = await prisma.containerInfo.findUnique({
+                where: { teamId: user.teamId }
+            });
+            
+            if (!containerInfo) {
+                socket.emit("build:error", { message: "Container not found" });
+                return;
+            }
+
+            // Add to build queue
+            const job = await buildQueue.addBuildJob({
+                teamId: user.teamId,
+                containerId: containerInfo.containerId,
+                buildCommand: data.buildCommand || "npm run build"
+            });
+
+            socket.emit("build:queued", {
+                jobId: job.id,
+                position: await buildQueue.getQueuePosition(job.id)
+            });
+        } catch (error) {
+            console.error("Error starting build:", error);
+            socket.emit("build:error", { message: "Failed to start build" });
+        }
+    });
+
+    socket.on("submission:create", async () => {
+        if (!user.teamId) return;
+        try {
+            const result = await submitTeamBuild(user.teamId);
+            
+            socket.emit("submission:success", {
+                submissionId: result.submissionId,
+                cdnUrl: result.cdnUrl,
+                deploymentUrl: result.deploymentUrl
+            });
+        } catch (error:any) {
+            console.error("Error creating submission:", error);
+            socket.emit("submission:error", { 
+                message: error.message || "Failed to create submission" 
+            });
+        }
+    });
 
 
 

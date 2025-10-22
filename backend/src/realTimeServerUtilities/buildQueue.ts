@@ -1,12 +1,14 @@
 import Queue from "bull";
 import { emitToTeam } from "./websocket";
 import { getContainer } from "../lib/docker";
+import { prisma } from "../lib/prismaClient";
+import { getBuildCommand } from "../lib/frameworkTemplate";
 
 
 interface BuildJob {
     teamId:string;
     containerId:string;
-    buildCommand:string;
+    buildCommand?:string;
 }
 
 
@@ -28,25 +30,37 @@ const buildQueue = new Queue<BuildJob> ("build-queue",{
 //process builds with max 10 concurrent jobs
 buildQueue.process(10,async(job) => {
     const {teamId,containerId,buildCommand} = job.data;
+    let resourcesBoosted = false;
     try{
         console.log(`Starting build for team ${teamId}`);
         emitToTeam(teamId,"build:started",{
             jobId:job.id,
             timestamp: Date.now()
         });
+        const team = await prisma.team.findUnique({
+            where:{
+                id:teamId
+            },
+            select:{
+                framework: true
+            }
+        });
+        const framework = team?.framework || "NEXTJS";
+        const finalBuildCommand = buildCommand || getBuildCommand(framework);
         await boostContainerResources(containerId);
-        const result = await executeBuildWithStreaming(teamId,containerId,buildCommand,(output) => {
+        resourcesBoosted = true;
+        const result = await executeBuildWithStreaming(teamId,containerId,finalBuildCommand,(output) => {
             emitToTeam(teamId,"build:log",{
                 jobId:job.id,
                 output,
                 timestamp:Date.now()
             })
         })
-        await resetContainerResources(containerId);
         emitToTeam(teamId,"build:success",{
             jobId:job.id,
             timestamp: Date.now(),
             duration:Date.now() - job.timestamp,
+            framework: framework
         });
         console.log(`Build completed for team ${teamId}`);
         return {
@@ -56,13 +70,25 @@ buildQueue.process(10,async(job) => {
         };
     }catch(error:any){
         console.error(`Build failed for team ${teamId}:`,error);
-        await resetContainerResources(containerId);
         emitToTeam(teamId,"build:failed",{
             jobId:job.id,
             error: error.message,
             timestamp: Date.now()
         });
         throw error;
+    } finally{
+        // always reset resources
+        if(resourcesBoosted){
+            try {
+                await resetContainerResources(containerId);
+                console.log(`Resources reset for container ${containerId} after build`);
+            } catch (error) {
+                emitToTeam(teamId,"build:resource-leak",{
+                    containerId,
+                    error: "Failed to reset container resources"
+                })
+            }
+        }
     }
 });
 
@@ -82,14 +108,14 @@ const executeBuildWithStreaming = async(teamId:string,containerId:string,buildCo
     return new Promise((resolve,reject) => {
         let stdout = "";
         let stderr = "";
-        stream.on("data",(chunck:Buffer) => {
-            const str = chunck.toString();
+        stream.on("data",(chunk:Buffer) => {
+            const str = chunk.toString();
 
-            if(chunck[0] === 1){
+            if(chunk[0] === 1){
                 const output = str.slice(8);
                 stdout += output;
                 onOutput(output);
-            }else if(chunck[0] === 2){
+            }else if(chunk[0] === 2){
                 const output = str.slice(8);
                 stderr += output;
                 onOutput(output);
@@ -111,6 +137,11 @@ const executeBuildWithStreaming = async(teamId:string,containerId:string,buildCo
 const boostContainerResources = async(containerId:string):Promise<void> => {
     try{
         const container = getContainer(containerId);
+        //verify container is running before boosting
+        const info = await container.inspect();
+        if(!info.State.Running){
+            throw new Error(`Container ${containerId} is not running `);
+        }
         await container.update({
             NanoCpus: 1e9,
             Memory: 1024*1024*1024
@@ -118,6 +149,7 @@ const boostContainerResources = async(containerId:string):Promise<void> => {
         console.log(`Boosted resources for container ${containerId}`);
     }catch(error){
         console.log(`Error boosting container resources:`,error);
+        throw new Error(`Cannot boost container resources: ${error instanceof Error ? error.message : 'Unknown error'}. Build may fail due to insufficient memory.`);
     }
 }
 
@@ -127,13 +159,19 @@ const resetContainerResources = async(containerId:string):Promise<void> => {
         const container = getContainer(containerId);
         const cpuLimit = parseFloat(process.env.CONTAINER_CPU_LIMIT || "0.5");
         const memoryLimit = process.env.CONTAINER_MEMORY_LIMIT || "512m";
+        const info = await container.inspect();
+        if (!info.State.Running) {
+            console.warn(`Container ${containerId} is not running, skipping resource reset`);
+            return;
+        }
         await container.update({
             NanoCpus: cpuLimit*1e9,
             Memory: parseMemory(memoryLimit)
         });
-        console.log(`Reset resources for container ${containerId}`);
+        console.log(`Reset resources for container ${containerId} to ${cpuLimit} CPU + ${memoryLimit} RAM`);
     }catch(error){
-        console.log(`Error resetting container resources:`,error);
+        console.error(`Failed to reset container resources for ${containerId}:`,error);
+        throw error;
     }
 }
 
@@ -166,7 +204,7 @@ export const getBuildStatus = async(jobId:string):Promise<any> => {
 };
 
 
-export const cancleBuild = async(jobId:string):Promise<boolean> => {
+export const cancelBuild = async(jobId:string):Promise<boolean> => {
     const job = await buildQueue.getJob(jobId);
     if(!job){
         return false;
@@ -209,11 +247,37 @@ buildQueue.on("failed",(job,err) => {
 
 buildQueue.on("stalled",(job) => {
     console.warn(`Build job ${job.id} stalled`);
+    if(job.data.teamId){
+        emitToTeam(job.data.teamId,"build:stalled",{
+            jobId:job.id,
+            message: "Build appears to be stuck. Please try again.",
+            timestamp: Date.now()
+        });
+    }
 })
 
 
 export const cleanupBuildQueue = async (): Promise<void> => {
     console.log("Cleaning up build queue");
     await buildQueue.close();
-    console.log("✅ Build queue cleaned up");
+    console.log("Build queue cleaned up");
+};
+
+
+export const addBuildJob = async (jobData: BuildJob): Promise<any> => {
+    return await buildQueue.add(jobData, {
+        priority: 1,
+        timeout: 120000
+    });
+};
+
+export const getQueuePosition = async (jobId: string): Promise<number> => {
+    const job = await buildQueue.getJob(jobId);
+    if (!job) {
+        return 0;
+    }
+    
+    const waitingJobs = await buildQueue.getWaiting();
+    const position = waitingJobs.findIndex(j => j.id === jobId);
+    return position >= 0 ? position + 1 : 0;
 };
