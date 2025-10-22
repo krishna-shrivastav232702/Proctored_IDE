@@ -1,7 +1,9 @@
 import { Response } from "express";
-import { z } from "zod";
+import { file, success, z } from "zod";
 import { prisma } from "../lib/prismaClient";
 import { AuthRequest } from "../middleware/auth";
+import { executeCommand } from "../lib/docker";
+
 
 export const listFiles = async (req: AuthRequest, res: Response) => {
   const user = req.user;
@@ -19,19 +21,25 @@ export const listFiles = async (req: AuthRequest, res: Response) => {
   }
 
   try {
-    const files = await prisma.file.findMany({
+    const containerInfo = await prisma.containerInfo.findUnique({
       where: { teamId },
-      select: {
-        path: true,
-        version: true,
-        updatedAt: true,
-      },
-      orderBy: {
-        path: "asc",
-      },
     });
+    if(!containerInfo){
+      return res.status(404).json({ error: "Container not found. Start a session first." });
+    }
+    const {stdout} = await executeCommand(
+      containerInfo.containerId,
+      "find /workspace -type f \\( -name '*.js' -o -name '*.ts' -o -name '*.tsx' -o -name '*.jsx' -o -name '*.json' -o -name '*.md' -o -name '*.html' -o -name '*.css' -o -name '*.vue' -o -name '*.svelte' \\) | head -200"
+    )
+    const files = stdout.split('\n')
+      .filter(path => path.trim())
+      .map(path => ({
+        path: path.replace('/workspace/', ''),
+        updatedAt: new Date()
+      }));
     return res.status(200).json({ files });
   } catch (error) {
+    console.error("Error listing files:", error);
     return res.status(500).json({ error: "Internal server error" });
   }
 };
@@ -42,33 +50,32 @@ export const getFile = async (req: AuthRequest, res: Response) => {
     return res.status(401).json({ error: "Unauthorized" });
   }
 
-  const { teamId, path } = req.params;
-  const filePath = Array.isArray(path) ? path.join("/") : path || "";
+  const { teamId } = req.params;
+  const filePath = req.params[0] || "";
 
   if (user.teamId !== teamId && user.role !== "ADMIN") {
     return res.status(403).json({ error: "Forbidden" });
   }
 
   try {
-    const file = await prisma.file.findUnique({
-      where: {
-        teamId_path: {
-          teamId,
-          path: filePath,
-        },
+    const containerInfo = await prisma.containerInfo.findUnique({
+      where: {teamId},
       },
-    });
+    );
 
-    if (!file) {
+    if (!containerInfo) {
       return res.status(404).json({ error: "File not found" });
     }
+    const { stdout } = await executeCommand(
+      containerInfo.containerId,
+      `cat "/workspace/${filePath}"`
+    );
 
     return res.status(200).json({
       file: {
-        path: file.path,
-        content: file.content,
-        version: file.version,
-        updatedAt: file.updatedAt,
+        path: filePath,
+        content: stdout,
+        updatedAt: new Date(),
       },
     });
   } catch (error) {
@@ -82,8 +89,8 @@ export const saveFile = async (req: AuthRequest, res: Response) => {
     return res.status(401).json({ error: "Unauthorized" });
   }
 
-  const { teamId, path } = req.params;
-  const filePath = Array.isArray(path) ? path.join("/") : path || "";
+  const { teamId } = req.params;
+  const filePath = req.params[0] || "";
 
   if (user.teamId !== teamId && user.role !== "ADMIN") {
     return res.status(403).json({ error: "Forbidden" });
@@ -92,7 +99,18 @@ export const saveFile = async (req: AuthRequest, res: Response) => {
   const { content } = req.body;
 
   try {
-    const file = await prisma.file.upsert({
+    const containerInfo = await prisma.containerInfo.findUnique({
+      where:{teamId}
+    })
+    if(!containerInfo){
+      return res.status(404).json({error:"Container not found"});
+    }
+    const base64Content = Buffer.from(content).toString('base64');
+    await executeCommand(
+      containerInfo.containerId,
+      `mkdir -p "/workspace/$(dirname "${filePath}")" && echo '${base64Content}' | base64 -d > "/workspace/${filePath}"`
+    )
+    await prisma.file.upsert({
       where: {
         teamId_path: {
           teamId,
@@ -100,23 +118,24 @@ export const saveFile = async (req: AuthRequest, res: Response) => {
         },
       },
       update: {
-        content,
         version: {
           increment: 1,
         },
+        updatedAt: new Date()
       },
       create: {
         teamId,
         path: filePath,
-        content,
+        content:"",
+        version: 1,
       },
     });
 
     return res.status(200).json({
+      success:true,
       file: {
-        path: file.path,
-        version: file.version,
-        updatedAt: file.updatedAt,
+        path: filePath,
+        updatedAt: new Date(),
       },
     });
   } catch (error) {
@@ -130,14 +149,26 @@ export const deleteFile = async (req: AuthRequest, res: Response) => {
     return res.status(401).json({ error: "Unauthorized" });
   }
 
-  const { teamId, path } = req.params;
-  const filePath = Array.isArray(path) ? path.join("/") : path || "";
+  const { teamId } = req.params;
+  const filePath =  req.params[0] || "";
 
   if (user.teamId !== teamId && user.role !== "ADMIN") {
     return res.status(403).json({ error: "Forbidden" });
   }
 
   try {
+    const containerInfo = await prisma.containerInfo.findUnique({
+      where: { teamId }
+    });
+
+    if (!containerInfo) {
+      return res.status(404).json({ error: "Container not found" });
+    }
+
+    await executeCommand(
+      containerInfo.containerId,
+      `rm -f "/workspace/${filePath}"`
+    );
     await prisma.file.delete({
       where: {
         teamId_path: {
@@ -145,6 +176,8 @@ export const deleteFile = async (req: AuthRequest, res: Response) => {
           path: filePath,
         },
       },
+    }).catch(() => {
+      
     });
     return res.status(200).json({ message: "File deleted successfully" });
   } catch (error) {
