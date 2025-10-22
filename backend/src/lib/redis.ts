@@ -5,6 +5,22 @@ export const redis = new Redis({
   token: process.env.UPSTASH_REDIS_REST_TOKEN!,
 });
 
+
+
+export async function setCache(key: string, value: string, ttlSeconds: number): Promise<void> {
+  await redis.setex(key, ttlSeconds, value);
+}
+
+export async function getFromCache(key: string): Promise<string | null> {
+  const cached = await redis.get(key);
+  return cached ? (cached as string) : null;
+}
+
+export async function deleteFromCache(key: string): Promise<void> {
+  await redis.del(key);
+}
+
+
 export async function getAIUsageCount(teamId: string): Promise<number> {
   const key = `ai:usage:${teamId}`;
   const count = await redis.get(key);
@@ -26,21 +42,33 @@ export async function canUseAi(teamId: string): Promise<boolean> {
   return count < maxHints;
 }
 
-export async function setSessionActive(
-  sessionId: string,
-  userId: string
-): Promise<void> {
-  const key = `session:${sessionId}`;
-  await redis.setex(key, 5 * 60 * 60, userId);
+export async function cacheContainerStatus(teamId:string,status:{ 
+  running: boolean;
+  containerId?: string;
+  stats?: any
+}):Promise<void>{
+  const key = `container:status:${teamId}`;
+  await redis.setex(key,30,JSON.stringify(status));
 }
 
-export async function isSessionActive(sessionId: string): Promise<boolean> {
-  const key = `session:${sessionId}`;
-  const exists = await redis.exists(key);
-  return exists === 1;
+export async function getCachedContainerStatus(teamId:string):Promise<{
+  running:boolean;
+  containerId?: string;
+  stats?: any
+} | null>{
+  const key = `container:status:${teamId}`;
+  const cached = await redis.get(key);
+  return cached ? JSON.parse(cached as string):null;
 }
 
-export async function deleteSession(sessionId: string): Promise<void> {
-  const key = `session:${sessionId}`;
-  await redis.del(key);
+
+export async function cacheBuildQueuePosition(jobId:string,position:number):Promise<void>{
+  const key = `build:queue:${jobId}`;
+  await redis.setex(key,60,position.toString());
+}
+
+export async function getCacheBuildQueueOperation(jobId:string):Promise<number | null > {
+  const key = `build:queue:${jobId}`;
+  const cached = await redis.get(key);
+  return cached ? parseInt(cached as string) : null;
 }
