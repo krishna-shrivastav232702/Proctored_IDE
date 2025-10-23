@@ -3,7 +3,7 @@ import { authenticate, requireAdmin, AuthRequest } from "../middleware/auth";
 import { getBuildStatus, cancelBuild, getQueueStats, addBuildJob, getQueuePosition } from "../realTimeServerUtilities/buildQueue";
 import { prisma } from "../lib/prismaClient";
 import rateLimit from "express-rate-limit";
-import Queue from "bull";
+import { Queue } from "bullmq";
 import { getBuildCommand } from "../lib/frameworkTemplate";
 
 const router = Router();
@@ -18,12 +18,13 @@ const buildRateLimiter = rateLimit({
     keyGenerator: (req: AuthRequest) => req.user?.teamId || req.ip || "anonymous",
 });
 
-// Build queue instance (read-only for checking status)
+// Build queue instance (read-only for checking status) - BullMQ
 const buildQueue = new Queue("build-queue", {
-    redis: {
-        host: process.env.REDIS_HOST || "localhost",
-        port: parseInt(process.env.REDIS_PORT || "6379"),
-        password: process.env.REDIS_PASSWORD
+    connection: {
+        host: process.env.UPSTASH_REDIS_HOST!,
+        port: parseInt(process.env.UPSTASH_REDIS_PORT || "6379"),
+        password: process.env.UPSTASH_REDIS_PASSWORD,
+        tls: process.env.UPSTASH_REDIS_TLS === "true" ? {} : undefined,
     }
 });
 
@@ -185,7 +186,7 @@ router.get("/queue/position", authenticate, async (req: AuthRequest, res) => {
             });
         }
 
-        const position = await getQueuePosition(teamJob.id.toString());
+        const position = await getQueuePosition(teamJob.id?.toString() || "");
         const state = await teamJob.getState();
 
         return res.json({

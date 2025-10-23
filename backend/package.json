@@ -23,7 +23,7 @@
     "@upstash/redis": "^1.35.5",
     "archiver": "^7.0.1",
     "bcryptjs": "^3.0.2",
-    "bull": "^4.16.5",
+    "bullmq": "^5.61.2",
     "chokidar": "^4.0.3",
     "compression": "^1.8.1",
     "cors": "^2.8.5",

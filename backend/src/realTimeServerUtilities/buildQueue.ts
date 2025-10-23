@@ -1,4 +1,4 @@
-import Queue from "bull";
+import { Queue, Worker, Job } from "bullmq";
 import { emitToTeam } from "./websocket";
 import { getContainer } from "../lib/docker";
 import { prisma } from "../lib/prismaClient";
@@ -11,87 +11,94 @@ interface BuildJob {
     buildCommand?:string;
 }
 
+// BullMQ connection configuration for Upstash Redis
+const connection = {
+    host: process.env.UPSTASH_REDIS_HOST!,
+    port: parseInt(process.env.UPSTASH_REDIS_PORT || "6379"),
+    password: process.env.UPSTASH_REDIS_PASSWORD,
+    tls: process.env.UPSTASH_REDIS_TLS === "true" ? {} : undefined,
+};
 
-const buildQueue = new Queue<BuildJob> ("build-queue",{
-    redis:{
-        host: process.env.REDIS_HOST || "localhost",
-        port: parseInt(process.env.REDIS_PORT || "6379"),
-        password: process.env.REDIS_PASSWORD
-    },
-    defaultJobOptions:{
-        attempts:1,
-        timeout:120000,
-        removeOnComplete:true,
-        removeOnFail: false
+const buildQueue = new Queue<BuildJob>("build-queue", {
+    connection,
+    defaultJobOptions: {
+        attempts: 1,
+        removeOnComplete: true,
+        removeOnFail: false,
     }
 });
 
-
-//process builds with max 10 concurrent jobs
-buildQueue.process(10,async(job) => {
-    const {teamId,containerId,buildCommand} = job.data;
-    let resourcesBoosted = false;
-    try{
-        console.log(`Starting build for team ${teamId}`);
-        emitToTeam(teamId,"build:started",{
-            jobId:job.id,
-            timestamp: Date.now()
-        });
-        const team = await prisma.team.findUnique({
-            where:{
-                id:teamId
-            },
-            select:{
-                framework: true
-            }
-        });
-        const framework = team?.framework || "NEXTJS";
-        const finalBuildCommand = buildCommand || getBuildCommand(framework);
-        await boostContainerResources(containerId);
-        resourcesBoosted = true;
-        const result = await executeBuildWithStreaming(teamId,containerId,finalBuildCommand,(output) => {
-            emitToTeam(teamId,"build:log",{
-                jobId:job.id,
-                output,
-                timestamp:Date.now()
-            })
-        })
-        emitToTeam(teamId,"build:success",{
-            jobId:job.id,
-            timestamp: Date.now(),
-            duration:Date.now() - job.timestamp,
-            framework: framework
-        });
-        console.log(`Build completed for team ${teamId}`);
-        return {
-            success:true,
-            stdout: result.stdout,
-            stderr: result.stderr
-        };
-    }catch(error:any){
-        console.error(`Build failed for team ${teamId}:`,error);
-        emitToTeam(teamId,"build:failed",{
-            jobId:job.id,
-            error: error.message,
-            timestamp: Date.now()
-        });
-        throw error;
-    } finally{
-        // always reset resources
-        if(resourcesBoosted){
-            try {
-                await resetContainerResources(containerId);
-                console.log(`Resources reset for container ${containerId} after build`);
-            } catch (error) {
-                emitToTeam(teamId,"build:resource-leak",{
-                    containerId,
-                    error: "Failed to reset container resources"
+// BullMQ uses a separate Worker instance to process jobs
+const buildWorker = new Worker<BuildJob>(
+    "build-queue",
+    async (job: Job<BuildJob>) => {
+        const { teamId, containerId, buildCommand } = job.data;
+        let resourcesBoosted = false;
+        try {
+            console.log(`Starting build for team ${teamId}`);
+            emitToTeam(teamId, "build:started", {
+                jobId: job.id,
+                timestamp: Date.now()
+            });
+            const team = await prisma.team.findUnique({
+                where: {
+                    id: teamId
+                },
+                select: {
+                    framework: true
+                }
+            });
+            const framework = team?.framework || "NEXTJS";
+            const finalBuildCommand = buildCommand || getBuildCommand(framework);
+            await boostContainerResources(containerId);
+            resourcesBoosted = true;
+            const result = await executeBuildWithStreaming(teamId, containerId, finalBuildCommand, (output) => {
+                emitToTeam(teamId, "build:log", {
+                    jobId: job.id,
+                    output,
+                    timestamp: Date.now()
                 })
+            })
+            emitToTeam(teamId, "build:success", {
+                jobId: job.id,
+                timestamp: Date.now(),
+                duration: Date.now() - job.timestamp,
+                framework: framework
+            });
+            console.log(`Build completed for team ${teamId}`);
+            return {
+                success: true,
+                stdout: result.stdout,
+                stderr: result.stderr
+            };
+        } catch (error: any) {
+            console.error(`Build failed for team ${teamId}:`, error);
+            emitToTeam(teamId, "build:failed", {
+                jobId: job.id,
+                error: error.message,
+                timestamp: Date.now()
+            });
+            throw error;
+        } finally {
+            // always reset resources
+            if (resourcesBoosted) {
+                try {
+                    await resetContainerResources(containerId);
+                    console.log(`Resources reset for container ${containerId} after build`);
+                } catch (error) {
+                    emitToTeam(teamId, "build:resource-leak", {
+                        containerId,
+                        error: "Failed to reset container resources"
+                    })
+                }
             }
         }
+    },
+    {
+        connection,
+        concurrency: 10, // Process max 10 concurrent jobs
     }
-});
-
+);
 
 const executeBuildWithStreaming = async(teamId:string,containerId:string,buildCommand:string,onOutput:(output:string) => void):Promise<{
     stdout:string;
@@ -195,9 +202,9 @@ export const getBuildStatus = async(jobId:string):Promise<any> => {
     }
     const state = await job.getState();
     return {
-        id:job.id,
+        id: job.id,
         state,
-        progress: job.progress(),
+        progress: job.progress,
         timestamp: job.timestamp,
         data: job.data,
     }
@@ -218,7 +225,7 @@ export const cancelBuild = async(jobId:string):Promise<boolean> => {
 }
 
 export const getQueueStats = async():Promise<any> => {
-    const [waiting,active,completed,failed] = await Promise.all([
+    const [waiting, active, completed, failed] = await Promise.all([
         buildQueue.getWaitingCount(),
         buildQueue.getActiveCount(),
         buildQueue.getCompletedCount(),
@@ -234,40 +241,34 @@ export const getQueueStats = async():Promise<any> => {
 }
 
 
-buildQueue.on("failed",(job,err) => {
-    console.error(`Build Job ${job.id} failed: `,err);
-    if(job.data.teamId){
-        emitToTeam(job.data.teamId,"build:error",{
-            jobId:job.id,
+buildWorker.on("failed", (job, err) => {
+    if (!job) return;
+    console.error(`Build Job ${job.id} failed: `, err);
+    if (job.data.teamId) {
+        emitToTeam(job.data.teamId, "build:error", {
+            jobId: job.id,
             error: err.message,
             timestamp: Date.now()
         })
     }
 })
 
-buildQueue.on("stalled",(job) => {
-    console.warn(`Build job ${job.id} stalled`);
-    if(job.data.teamId){
-        emitToTeam(job.data.teamId,"build:stalled",{
-            jobId:job.id,
-            message: "Build appears to be stuck. Please try again.",
-            timestamp: Date.now()
-        });
-    }
+buildWorker.on("stalled", (jobId) => {
+    console.warn(`Build job ${jobId} stalled`);
 })
 
 
 export const cleanupBuildQueue = async (): Promise<void> => {
     console.log("Cleaning up build queue");
+    await buildWorker.close();
     await buildQueue.close();
     console.log("Build queue cleaned up");
 };
 
 
 export const addBuildJob = async (jobData: BuildJob): Promise<any> => {
-    return await buildQueue.add(jobData, {
+    return await buildQueue.add("build", jobData, {
         priority: 1,
-        timeout: 120000
     });
 };
 
@@ -278,6 +279,6 @@ export const getQueuePosition = async (jobId: string): Promise<number> => {
     }
     
     const waitingJobs = await buildQueue.getWaiting();
-    const position = waitingJobs.findIndex(j => j.id === jobId);
+    const position = waitingJobs.findIndex(j => j && j.id === jobId);
     return position >= 0 ? position + 1 : 0;
 };
