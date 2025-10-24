@@ -1,9 +1,9 @@
 "use client";
 
-import React, { useState, useCallback } from "react";
+import React, { useState, useCallback, useEffect } from "react";
 import { X, File, Code, FileText, Settings } from "lucide-react";
 import { cn } from "@/lib/utils";
-import Editor from "@monaco-editor/react";
+import Editor, { useMonaco } from "@monaco-editor/react";
 
 export interface EditorTab {
   id: string;
@@ -94,6 +94,20 @@ export const TabbedEditor: React.FC<TabbedEditorProps> = ({
   const [editorContent, setEditorContent] = useState<Record<string, string>>(
     {}
   );
+  const monaco = useMonaco();
+  useEffect(() => {
+    if(monaco){
+      monaco.editor.defineTheme('custom-dark',{
+        base:'vs-dark',
+        inherit:true,
+        rules:[],
+        colors:{
+          "editor.background":"#0f172a"
+        }
+      })
+      monaco.editor.setTheme("custom-dark");
+    }
+  },[monaco]);
 
   const activeTab = tabs.find((tab) => tab.id === activeTabId);
 
@@ -154,7 +168,7 @@ export const TabbedEditor: React.FC<TabbedEditorProps> = ({
             language={activeTab.language}
             value={editorContent[activeTab.id] ?? activeTab.content}
             onChange={(value) => handleEditorChange(value || "", activeTab.id)}
-            theme="vs-dark"
+            theme="custom-dark"
             options={{
               readOnly: false,
               contextmenu: false,

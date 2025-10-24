@@ -149,11 +149,15 @@ const boostContainerResources = async(containerId:string):Promise<void> => {
         if(!info.State.Running){
             throw new Error(`Container ${containerId} is not running `);
         }
+        
+        const buildCpuLimit = parseFloat(process.env.CONTAINER_BUILD_CPU_LIMIT || "1.5");
+        const buildMemoryLimit = process.env.CONTAINER_BUILD_MEMORY_LIMIT || "2048m";
+        
         await container.update({
-            NanoCpus: 1e9,
-            Memory: 1024*1024*1024
+            NanoCpus: buildCpuLimit * 1e9,
+            Memory: parseMemory(buildMemoryLimit)
         });
-        console.log(`Boosted resources for container ${containerId}`);
+        console.log(`Boosted resources for container ${containerId} to ${buildCpuLimit} CPU, ${buildMemoryLimit} RAM`);
     }catch(error){
         console.log(`Error boosting container resources:`,error);
         throw new Error(`Cannot boost container resources: ${error instanceof Error ? error.message : 'Unknown error'}. Build may fail due to insufficient memory.`);

@@ -11,6 +11,7 @@ const s3Client = new S3Client({
     accessKeyId: process.env.S3_ACCESS_KEY!,
     secretAccessKey: process.env.S3_SECRET_KEY!,
   },
+  ...(process.env.S3_ENDPOINT && { endpoint: process.env.S3_ENDPOINT }),
 });
 
 const bucket = process.env.S3_BUCKET!;

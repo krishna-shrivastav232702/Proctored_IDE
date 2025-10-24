@@ -31,7 +31,6 @@ const PORT = process.env.PORT || 5000;
 
 const server = http.createServer(app);
 
-
 const io = initializeWebSocket(server);
 
 app.use(helmet({
@@ -40,25 +39,21 @@ app.use(helmet({
 
 app.use(compression());
 
-
-const generalLimiter = rateLimit({
+//300 requests/15min per userId (not IP!)
+const userLimiter = rateLimit({
   windowMs: 15*60*1000,
   max: 300,
   message: { error: "You're making too many requests. Please slow down a bit." },
   standardHeaders: true,
   legacyHeaders: false,
-
-  keyGenerator:(req:AuthRequest) => {
-    if(req.user?.userId){
-      return `user:${req.user.userId}`;
-    }
-    return `ip:${req.ip}`
-  },
+  keyGenerator:(req:AuthRequest) => `user:${req.user!.userId}`,
+  skip: (req: AuthRequest) => !req.user?.userId,
   skipSuccessfulRequests: false,
   skipFailedRequests: false,
 });
 
 
+// 20 attempts/15min per email address
 const authLimiter = rateLimit({
   windowMs: 15*60*1000,
   max: 20,
@@ -70,24 +65,18 @@ const authLimiter = rateLimit({
     if (email && typeof email === 'string') {
       return `auth:${email.toLowerCase()}`;
     }
-    return `auth-ip:${req.ip}`
+    // Use a default key for requests without email
+    return 'auth:no-email';
   },
   skipSuccessfulRequests: true,
 })
 
-
+// 100 req/min per IP (monitoring)
 const abuseDetector = rateLimit({
   windowMs: 60 * 1000, 
   max: 100, 
   standardHeaders: false,
   legacyHeaders: false,
-  keyGenerator: (req: AuthRequest) => {
-    if (req.user?.userId) {
-      return `abuse:user:${req.user.userId}`;
-    }
-    return `abuse:ip:${req.ip}`;
-  },
-  
   handler: (req: AuthRequest, res,next) => {
     console.warn(`ABUSE DETECTED: User ${req.user?.email || req.ip} making ${req.rateLimit?.current || 'many'} requests/min`);
     if (io && req.user) {
@@ -122,13 +111,15 @@ const applyAuth = (req:Request,res:Response,next:NextFunction) => {
 
 
 
-app.use("/api/auth", authLimiter,authRoutes);
-app.use("/api/team",applyAuth,generalLimiter,abuseDetector, teamRoutes);
-app.use("/api/session", applyAuth, generalLimiter, abuseDetector, sessionRoutes);
-app.use("/api/admin", adminRoutes);
-app.use("/api/build", abuseDetector, buildRoutes);
-app.use("/api/ai", abuseDetector, aiRoutes);
-app.use("/api/submission", applyAuth, generalLimiter, abuseDetector, submissionRoutes);
+
+app.use("/auth", authLimiter,authRoutes);
+app.use("/team",applyAuth,userLimiter,abuseDetector, teamRoutes);
+app.use("/session", applyAuth, userLimiter, abuseDetector, sessionRoutes);
+app.use("/admin", adminRoutes);
+app.use("/build", abuseDetector, buildRoutes);
+app.use("/ai", abuseDetector, aiRoutes);
+app.use("/submission", applyAuth, userLimiter, abuseDetector, submissionRoutes);
+
 
 app.get("/health", (req, res) => {
   res.json({ status: "ok", timestamp: new Date().toISOString(), uptime: process.uptime(), memory:process.memoryUsage() });
@@ -217,10 +208,8 @@ const gracefulShutdown = async(signal:string) => {
   }
 }
 
-
 process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
 process.on("SIGINT", () => gracefulShutdown("SIGINT"));
-
 
 process.on("uncaughtException", (error) => {
   console.error("Uncaught Exception:", error);
@@ -230,8 +219,6 @@ process.on("uncaughtException", (error) => {
 process.on("unhandledRejection", (reason, promise) => {
   console.error("Unhandled Rejection at:", promise, "reason:", reason);
 });
-
-
 
 
 server.listen(PORT, () => {

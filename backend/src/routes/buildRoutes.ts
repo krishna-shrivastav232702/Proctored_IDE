@@ -2,7 +2,7 @@ import { Router } from "express";
 import { authenticate, requireAdmin, AuthRequest } from "../middleware/auth";
 import { getBuildStatus, cancelBuild, getQueueStats, addBuildJob, getQueuePosition } from "../realTimeServerUtilities/buildQueue";
 import { prisma } from "../lib/prismaClient";
-import rateLimit from "express-rate-limit";
+import rateLimit, { ipKeyGenerator } from "express-rate-limit";
 import { Queue } from "bullmq";
 import { getBuildCommand } from "../lib/frameworkTemplate";
 
@@ -10,15 +10,15 @@ const router = Router();
 
 // Rate limiter: max 5 builds per 5 minutes per team
 const buildRateLimiter = rateLimit({
-    windowMs: 5 * 60 * 1000, // 5 minutes
+    windowMs: 5 * 60 * 1000, 
     max: 5,
     message: { error: "Too many build requests. Please wait before trying again." },
     standardHeaders: true,
     legacyHeaders: false,
-    keyGenerator: (req: AuthRequest) => req.user?.teamId || req.ip || "anonymous",
+    keyGenerator: (req: AuthRequest) => req.user?.teamId || 'no-team',
 });
 
-// Build queue instance (read-only for checking status) - BullMQ
+// Build queue instance (read-only for checking status) 
 const buildQueue = new Queue("build-queue", {
     connection: {
         host: process.env.UPSTASH_REDIS_HOST!,

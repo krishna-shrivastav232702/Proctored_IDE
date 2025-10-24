@@ -1,5 +1,10 @@
 "use client";
+import { authAPI } from "@/lib/api/endpoints/auth";
+import { useIdeStore } from "@/store/store";
+import { useRouter } from "next/navigation";
 import { useState, useEffect } from "react";
+import { toast } from "sonner";
+import { AxiosError } from "axios";
 
 interface RegisterModalProps {
   closeModal: () => void;
@@ -21,6 +26,9 @@ export default function RegisterModal({
   const [error, setError] = useState("");
   const [show, setShow] = useState(false);
 
+  const { setUser } = useIdeStore();
+  const router = useRouter();
+
   useEffect(() => setShow(true), []);
 
   const handleClose = () => {
@@ -40,7 +48,6 @@ export default function RegisterModal({
 
   const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
-    setLoading(true);
     setMessage("");
     setError("");
 
@@ -49,35 +56,34 @@ export default function RegisterModal({
       setLoading(false);
       return;
     }
+    if (password.length < 6) {
+      toast.error("Password must be at least 6 characters");
+      return;
+    }
+    setLoading(true);
 
     try {
-      const res = await fetch("/api/auth/register", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name, email, password, teamName }),
+      const authData = await authAPI.signup({
+        name: name,
+        email: email,
+        password: password,
+        ...(teamName && { teamName }), 
       });
-
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.message || "Registration failed");
-
-      // Store token in localStorage
-      if (data.token) {
-        localStorage.setItem("token", data.token);
+      authAPI.storeAuth(authData);
+      setUser(authData.user);
+      if (authData.user.team) {
+        toast.success(`Account created! Team "${authData.user.team.name}" created.`);
+      } else {
+        toast.success("Account created successfully!");
       }
-
-      // Call onRegisterSuccess if provided
-      if (onRegisterSuccess && data.user) {
-        onRegisterSuccess(data.user);
+      router.push("/ide");
+    } catch (error) {
+      if (error instanceof AxiosError) {
+        const errorMessage = error.response?.data?.message || error.response?.data?.error;
+        toast.error(errorMessage || "Signup failed. Please try again.");
+      } else {
+        toast.error("An unexpected error occurred.");
       }
-
-      setMessage("✅ Registration successful! You can now log in.");
-      setName("");
-      setEmail("");
-      setPassword("");
-      setTeamName("");
-    } catch (err: unknown) {
-      if (err instanceof Error) setError(err.message);
-      else setError("An unknown error occurred");
     } finally {
       setLoading(false);
     }
@@ -170,3 +176,6 @@ export default function RegisterModal({
     </div>
   );
 }
+
+
+

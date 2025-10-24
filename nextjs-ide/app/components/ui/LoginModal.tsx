@@ -1,5 +1,10 @@
 "use client";
 import { useState, useEffect } from "react";
+import { authAPI } from "@/lib/api/endpoints/auth";
+import { useIdeStore } from "@/store/store";
+import { useRouter } from "next/navigation";
+import { toast } from "sonner";
+import { AxiosError } from "axios";
 
 interface LoginModalProps {
   closeModal: () => void;
@@ -17,6 +22,8 @@ export default function LoginModal({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [show, setShow] = useState(false);
+  const { setUser } = useIdeStore();
+  const router = useRouter();
 
   useEffect(() => setShow(true), []);
 
@@ -41,21 +48,21 @@ export default function LoginModal({
     setError("");
 
     try {
-      const res = await fetch("/api/auth/login", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, password }),
+      const authData = await authAPI.login({
+        email,
+        password,
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.message || "Login failed");
-      if (onLoginSuccess) {
-        onLoginSuccess(data.user); // Assuming your API returns user data
+      authAPI.storeAuth(authData);
+      setUser(authData.user);
+      toast.success("Login successful!");
+      router.push("/ide");
+    } catch (error) {
+      if (error instanceof AxiosError) {
+        const errorMessage = error.response?.data?.message || error.response?.data?.error;
+        toast.error(errorMessage || 'Login failed. Please try again.');
+      } else {
+        toast.error('An unexpected error occurred.');
       }
-      alert("✅ Login successful!");
-      handleClose();
-    } catch (err) {
-      if (err instanceof Error) setError(err.message);
-      else setError("An unknown error occurred");
     } finally {
       setLoading(false);
     }

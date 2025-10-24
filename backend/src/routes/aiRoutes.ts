@@ -3,18 +3,18 @@ import { authenticate, requireAdmin, AuthRequest } from "../middleware/auth";
 import { redis } from "../lib/redis";
 import { prisma } from "../lib/prismaClient";
 import { askGemini } from "../lib/gemini"
-import rateLimit from "express-rate-limit";
+import rateLimit, { ipKeyGenerator } from "express-rate-limit";
 
 const router = Router();
 
 // Rate limiter: max 10 requests per minute per user
 const aiRateLimiter = rateLimit({
-    windowMs: 60 * 1000, // 1 minute
+    windowMs: 60 * 1000, 
     max: 10,
     message: { error: "Too many AI requests. Please wait a minute before trying again." },
     standardHeaders: true,
     legacyHeaders: false,
-    keyGenerator: (req: AuthRequest) => req.user?.userId || req.ip || "anonymous",
+    keyGenerator: (req: AuthRequest) => req.user?.userId || 'no-user',
 });
 
 // Helper function to atomically increment and check AI usage
