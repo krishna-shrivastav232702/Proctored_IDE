@@ -32,6 +32,16 @@ interface FileNode{
     children?:FileNode[];
 }
 
+interface EditorTab {
+    id:string;
+    name:string;
+    path:string;
+    content:string;
+    language:string;
+    isDirty: boolean;
+}
+
+
 interface IdeState {
     user: User | null;
     setUser: (user: User | null) => void;
@@ -48,6 +58,33 @@ interface IdeState {
     setFileTree: (files:FileNode[]) => void;
     refreshFileTree: () => void;
     fileTreeVersion: number;
+
+    //active members
+    activeMembers:Array<{
+        userId:string;
+        email:string;
+        cursor?:{
+            file:string;
+            line:number;
+            column:number;
+        };
+    }>;
+    addMember:(userId:string,email:string) => void;
+    removeMember: (userId:string) => void;
+    updateMemberCursor:(userId:string,cursor:{
+        file:string;
+        line:number;
+        column:number
+    }) => void;
+
+    // editor tabs
+    tabs:EditorTab[];
+    activeTabId: string | null;
+    addTab: (tab:EditorTab) => void;
+    removeTab: (tabId:string) => void;
+    setActiveTab: (tabId:string) => void;
+    updateTabContent: (tabId:string,content:string) => void;
+    markTabDirty: (tabId:string,isDirty:boolean) => void;
 
 }
 
@@ -71,6 +108,53 @@ export const useIdeStore = create<IdeState>((set,get) => ({
     fileTreeVersion: 0,
     setFileTree:(files) => set({fileTree: files}),
     refreshFileTree:() => set((state) => ({fileTreeVersion: state.fileTreeVersion + 1})),
+
+
+    //active members
+
+    activeMembers:[],
+    addMember:(userId,email) => set((state) => {
+        const exists = state.activeMembers.find((m) => m.userId === userId);
+        if(exists) return state;
+        return {
+            activeMembers: [...state.activeMembers,{userId,email}],
+        }
+    }),
+    removeMember:(userId) => set((state) => ({
+        activeMembers: state.activeMembers.filter((m) => m.userId !== userId),
+    })),
+    updateMemberCursor:(userId,cursor) => set((state) => ({
+        activeMembers: state.activeMembers.map((m) => m.userId === userId ? {...m,cursor}:m)
+    })),
+
+    //editor tabs
+    tabs:[],
+    activeTabId:null,
+    addTab:(tab) => set((state) => {
+        const exists = state.tabs.find((t) => t.id === tab.id);
+        if(exists){
+            return {activeTabId:tab.id};
+        }
+        return {
+            tabs:[...state.tabs,tab],
+            activeTabId:tab.id,
+        }
+    }),
+    removeTab:(tabId) => set((state) => {
+        const newTabs = state.tabs.filter((t) => t.id !== tabId);
+        const newActiveTab = state.activeTabId === tabId ? newTabs[0]?.id || null : state.activeTabId;
+        return {
+            tabs: newTabs,
+            activeTabId: newActiveTab,
+        }
+    }),
+    setActiveTab: (tabId) => set({activeTabId:tabId}),
+    updateTabContent:(tabId,content) => set((state) => ({
+        tabs: state.tabs.map((tab) => tab.id === tabId ? {...tab,content}:tab),
+    })),
+    markTabDirty:(tabId,isDirty) => set((state) => ({
+        tabs: state.tabs.map((tab) => tab.id === tabId ? {...tab,isDirty}:tab)
+    }))
 }))
 
 
