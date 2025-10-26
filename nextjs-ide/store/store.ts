@@ -1,5 +1,7 @@
 import { create } from "zustand";
 import { Collaborator } from "@/types";
+import { Team } from "@/lib/api/endpoints/team";
+import { Session } from "@/lib/api/endpoints/session";
 
 interface User {
     id: string;
@@ -26,19 +28,19 @@ interface ContainerStats {
     };
 }
 
-interface FileNode{
-    name:string;
-    path:string;
-    type:'file' | 'folder';
-    children?:FileNode[];
+interface FileNode {
+    name: string;
+    path: string;
+    type: 'file' | 'folder';
+    children?: FileNode[];
 }
 
 interface EditorTab {
-    id:string;
-    name:string;
-    path:string;
-    content:string;
-    language:string;
+    id: string;
+    name: string;
+    path: string;
+    content: string;
+    language: string;
     isDirty: boolean;
 }
 
@@ -51,41 +53,41 @@ interface IdeState {
 
     // terminal
     terminalOutput: string;
-    addTerminalOutput: (output:string) => void;
+    addTerminalOutput: (output: string) => void;
     clearTerminal: () => void;
 
     // file tree
     fileTree: FileNode[];
-    setFileTree: (files:FileNode[]) => void;
+    setFileTree: (files: FileNode[]) => void;
     refreshFileTree: () => void;
     fileTreeVersion: number;
 
     //active members
-    activeMembers:Array<{
-        userId:string;
-        email:string;
-        cursor?:{
-            file:string;
-            line:number;
-            column:number;
+    activeMembers: Array<{
+        userId: string;
+        email: string;
+        cursor?: {
+            file: string;
+            line: number;
+            column: number;
         };
     }>;
-    addMember:(userId:string,email:string) => void;
-    removeMember: (userId:string) => void;
-    updateMemberCursor:(userId:string,cursor:{
-        file:string;
-        line:number;
-        column:number
+    addMember: (userId: string, email: string) => void;
+    removeMember: (userId: string) => void;
+    updateMemberCursor: (userId: string, cursor: {
+        file: string;
+        line: number;
+        column: number
     }) => void;
 
     // editor tabs
-    tabs:EditorTab[];
+    tabs: EditorTab[];
     activeTabId: string | null;
-    addTab: (tab:EditorTab) => void;
-    removeTab: (tabId:string) => void;
-    setActiveTab: (tabId:string) => void;
-    updateTabContent: (tabId:string,content:string) => void;
-    markTabDirty: (tabId:string,isDirty:boolean) => void;
+    addTab: (tab: EditorTab) => void;
+    removeTab: (tabId: string) => void;
+    setActiveTab: (tabId: string) => void;
+    updateTabContent: (tabId: string, content: string) => void;
+    markTabDirty: (tabId: string, isDirty: boolean) => void;
 
 
     //collaborative editor
@@ -95,14 +97,25 @@ interface IdeState {
     setCursorPosition: (userId: string, position: { file: string; line: number; column: number; email: string }) => void;
     removeCursorPosition: (userId: string) => void;
 
+
+    // Team & Session
+    currentTeam: Team | null;
+    setCurrentTeam: (team: Team | null) => void;
+    currentSession: Session | null;
+    setCurrentSession: (session: Session | null) => void;
+    containerStatus: 'running' | 'stopped' | 'starting' | null;
+    setContainerStatus: (status: 'running' | 'stopped' | 'starting' | null) => void;
+    containerStats: ContainerStats | null;
+    setContainerStats: (stats: ContainerStats | null) => void;
+
 }
 
 
-export const useIdeStore = create<IdeState>((set,get) => ({
+export const useIdeStore = create<IdeState>((set, get) => ({
     user: null,
-    setUser: (user) => set({user,isAuthenticated: !!user}),
+    setUser: (user) => set({ user, isAuthenticated: !!user }),
     isAuthenticated: false,
-    setIsAuthenticated: (isAuthenticated) => set({isAuthenticated}),
+    setIsAuthenticated: (isAuthenticated) => set({ isAuthenticated }),
 
 
     //terminal
@@ -110,46 +123,46 @@ export const useIdeStore = create<IdeState>((set,get) => ({
     addTerminalOutput: (output) => set((state) => ({
         terminalOutput: state.terminalOutput + output,
     })),
-    clearTerminal: () => set({terminalOutput:""}),
+    clearTerminal: () => set({ terminalOutput: "" }),
 
     //file tree
-    fileTree:[],
+    fileTree: [],
     fileTreeVersion: 0,
-    setFileTree:(files) => set({fileTree: files}),
-    refreshFileTree:() => set((state) => ({fileTreeVersion: state.fileTreeVersion + 1})),
+    setFileTree: (files) => set({ fileTree: files }),
+    refreshFileTree: () => set((state) => ({ fileTreeVersion: state.fileTreeVersion + 1 })),
 
 
     //active members
 
-    activeMembers:[],
-    addMember:(userId,email) => set((state) => {
+    activeMembers: [],
+    addMember: (userId, email) => set((state) => {
         const exists = state.activeMembers.find((m) => m.userId === userId);
-        if(exists) return state;
+        if (exists) return state;
         return {
-            activeMembers: [...state.activeMembers,{userId,email}],
+            activeMembers: [...state.activeMembers, { userId, email }],
         }
     }),
-    removeMember:(userId) => set((state) => ({
+    removeMember: (userId) => set((state) => ({
         activeMembers: state.activeMembers.filter((m) => m.userId !== userId),
     })),
-    updateMemberCursor:(userId,cursor) => set((state) => ({
-        activeMembers: state.activeMembers.map((m) => m.userId === userId ? {...m,cursor}:m)
+    updateMemberCursor: (userId, cursor) => set((state) => ({
+        activeMembers: state.activeMembers.map((m) => m.userId === userId ? { ...m, cursor } : m)
     })),
 
     //editor tabs
-    tabs:[],
-    activeTabId:null,
-    addTab:(tab) => set((state) => {
+    tabs: [],
+    activeTabId: null,
+    addTab: (tab) => set((state) => {
         const exists = state.tabs.find((t) => t.id === tab.id);
-        if(exists){
-            return {activeTabId:tab.id};
+        if (exists) {
+            return { activeTabId: tab.id };
         }
         return {
-            tabs:[...state.tabs,tab],
-            activeTabId:tab.id,
+            tabs: [...state.tabs, tab],
+            activeTabId: tab.id,
         }
     }),
-    removeTab:(tabId) => set((state) => {
+    removeTab: (tabId) => set((state) => {
         const newTabs = state.tabs.filter((t) => t.id !== tabId);
         const newActiveTab = state.activeTabId === tabId ? newTabs[0]?.id || null : state.activeTabId;
         return {
@@ -157,12 +170,12 @@ export const useIdeStore = create<IdeState>((set,get) => ({
             activeTabId: newActiveTab,
         }
     }),
-    setActiveTab: (tabId) => set({activeTabId:tabId}),
-    updateTabContent:(tabId,content) => set((state) => ({
-        tabs: state.tabs.map((tab) => tab.id === tabId ? {...tab,content}:tab),
+    setActiveTab: (tabId) => set({ activeTabId: tabId }),
+    updateTabContent: (tabId, content) => set((state) => ({
+        tabs: state.tabs.map((tab) => tab.id === tabId ? { ...tab, content } : tab),
     })),
-    markTabDirty:(tabId,isDirty) => set((state) => ({
-        tabs: state.tabs.map((tab) => tab.id === tabId ? {...tab,isDirty}:tab)
+    markTabDirty: (tabId, isDirty) => set((state) => ({
+        tabs: state.tabs.map((tab) => tab.id === tabId ? { ...tab, isDirty } : tab)
     })),
 
 
@@ -171,13 +184,24 @@ export const useIdeStore = create<IdeState>((set,get) => ({
     setCollaborators: (collaborators) => set({ collaborators }),
     cursorPositions: {},
     setCursorPosition: (userId, position) => set((state) => ({
-      cursorPositions: {
-        ...state.cursorPositions,
-        [userId]: position,
-      },
+        cursorPositions: {
+            ...state.cursorPositions,
+            [userId]: position,
+        },
     })),
     removeCursorPosition: (userId) => set((state) => {
-      const { [userId]: removed, ...rest } = state.cursorPositions;
-      return { cursorPositions: rest };
+        const { [userId]: removed, ...rest } = state.cursorPositions;
+        return { cursorPositions: rest };
     }),
+
+
+    // Team & Session
+    currentTeam: null,
+    setCurrentTeam: (team) => set({ currentTeam: team }),
+    currentSession: null,
+    setCurrentSession: (session) => set({ currentSession: session }),
+    containerStatus: null,
+    setContainerStatus: (status) => set({ containerStatus: status }),
+    containerStats: null,
+    setContainerStats: (stats) => set({ containerStats: stats }),
 }))
