@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { Collaborator } from "@/types";
 
 interface User {
     id: string;
@@ -86,6 +87,14 @@ interface IdeState {
     updateTabContent: (tabId:string,content:string) => void;
     markTabDirty: (tabId:string,isDirty:boolean) => void;
 
+
+    //collaborative editor
+    collaborators: Collaborator[];
+    setCollaborators: (collaborators: Collaborator[]) => void;
+    cursorPositions: Record<string, { file: string; line: number; column: number; email: string }>;
+    setCursorPosition: (userId: string, position: { file: string; line: number; column: number; email: string }) => void;
+    removeCursorPosition: (userId: string) => void;
+
 }
 
 
@@ -154,8 +163,21 @@ export const useIdeStore = create<IdeState>((set,get) => ({
     })),
     markTabDirty:(tabId,isDirty) => set((state) => ({
         tabs: state.tabs.map((tab) => tab.id === tabId ? {...tab,isDirty}:tab)
-    }))
+    })),
+
+
+    //collaborative editor
+    collaborators: [],
+    setCollaborators: (collaborators) => set({ collaborators }),
+    cursorPositions: {},
+    setCursorPosition: (userId, position) => set((state) => ({
+      cursorPositions: {
+        ...state.cursorPositions,
+        [userId]: position,
+      },
+    })),
+    removeCursorPosition: (userId) => set((state) => {
+      const { [userId]: removed, ...rest } = state.cursorPositions;
+      return { cursorPositions: rest };
+    }),
 }))
-
-
-
