@@ -16,6 +16,7 @@ model User {
   teamId        String?
   team          Team?          @relation("TeamMembers", fields: [teamId], references: [id])
   ownedTeam     Team?          @relation("TeamOwner")
+  joinRequests  JoinRequest[]
   createdAt     DateTime       @default(now())
   updatedAt     DateTime       @updatedAt
   sessions      Session[]
@@ -33,7 +34,7 @@ enum Role {
 model Team {
   id            String         @id @default(cuid())
   name          String
-  framework     Framework      @default(NEXTJS)
+  framework     Framework?
   ownerId       String         @unique
   owner         User           @relation(fields: [ownerId], references: [id], name: "TeamOwner")
   members       User[]         @relation("TeamMembers")
@@ -42,6 +43,7 @@ model Team {
   submissions   Submission[]
   aiUsage       AIUsage[]
   containerInfo ContainerInfo?
+  joinRequests  JoinRequest[]
   createdAt     DateTime       @default(now())
   updatedAt     DateTime       @updatedAt
 
@@ -57,6 +59,20 @@ enum Framework {
   STATIC_HTML
 }
 
+model JoinRequest {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  teamId    String
+  team      Team     @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  status    String   @default("PENDING")
+  createdAt DateTime @default(now())
+
+  @@unique([userId, teamId])
+  @@index([userId])
+  @@index([teamId])
+  @@index([status])
+}
 
 model Session {
   id        String    @id @default(cuid())
